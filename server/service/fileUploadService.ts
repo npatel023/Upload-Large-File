@@ -1,53 +1,79 @@
-import { v4 as uuidv4 } from 'uuid'
-import path from 'path'
 import fs from 'fs'
 import fileRepo from '../repository/FileRepo'
+import fileSessionService from './FileSessionService'
+
+interface FileData {
+    file: Express.Multer.File,
+    fileSessionId: number,
+    fileName: string,
+    isLastBlock: boolean
+}
 
 class FileUploadService
 {
-    private file: Express.Multer.File
+    private fileData: FileData
 
-    constructor(file: Express.Multer.File) {
-        this.file = file
+    constructor(fileData: FileData) {
+        this.fileData = fileData
     }
 
-    private getFileExtension(): string {
-        return path.extname(this.file.originalname)
+    async writeFileData(): Promise<{ success: boolean, fileId?: number }> {
+        const fileStreamResponse = await this.writeToFileStream()
+
+        if (fileStreamResponse === false) {
+            return {
+                success: false
+            }
+        }
+
+        let fileId = 0
+
+        if (this.fileData.isLastBlock) {
+            fileId = await this.createFileRecord()
+        }
+
+        return {
+            success: true,
+            fileId
+        }
     }
 
-    async createFileUpload(): Promise<number> {
-        const uniqueFileName = this.createUniqueFileName()
-        const fileId = await this.createFileRecord(uniqueFileName)
-        
-        this.writeToFileStream(uniqueFileName)
+    private async writeToFileStream(): Promise<boolean> {
+        return await new Promise((resolve, reject) => {
+            const fileStream = fs.createWriteStream(
+                `${__dirname}/../img/${this.fileData.fileName}`,
+                {
+                    flags: 'a'
+                } 
+            )
+    
+            fileStream.write(this.fileData.file.buffer, 'base64')
+    
+            fileStream.on('error', () => {
+                console.log('error occurred while writing to stream')
+                reject(false)
+            })
 
-        return fileId
+            fileStream.on('finish', () => resolve(true))
+            
+            fileStream.end()
+        })
     }
 
-    private createUniqueFileName(): string {
-        const timeStamp = new Date().toISOString().replace(/[-:.TZ]/g, "")
-        return `${uuidv4()}_${timeStamp}${this.getFileExtension()}`
-    }
+    private async createFileRecord(): Promise<number> {
+        const fileDetails = await fileSessionService.findFileSessionDetails(this.fileData.fileSessionId, this.fileData.fileName)
 
-    private async createFileRecord(uniqueFileName: string): Promise<number> {
+        if (fileDetails === false) {
+            return 0
+        }
+
         return await fileRepo.createFileRecord({
-            originalFileName: this.file.originalname,
-            uniqueFileName,
-            fileSize: this.file.size,
-            fileExtension: this.getFileExtension(),
-        })
-    }
-
-    private writeToFileStream(uniqueFileName: string) {
-        const fileStream = fs.createWriteStream(`${__dirname}/../img/${uniqueFileName}`)
-
-        fileStream.write(this.file.buffer, 'base64')
-
-        fileStream.on('error', () => {
-            console.log('error occurred while writing to stream')
+            fileExtension: fileDetails.fileExtension,
+            fileSize: fileDetails.fileSize,
+            originalFileName: fileDetails.originalFileName,
+            uniqueFileName: fileDetails.uniqueFileName
         })
         
-        fileStream.end()
     }
 }
 

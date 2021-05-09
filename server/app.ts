@@ -10,5 +10,6 @@ const upload = multer()
 app.use(cors())
 
 app.post('/uploadFile', upload.single('file'), fileController.uploadFile)
+app.post('/createFileUploadSession', upload.none(), fileController.createFileUploadSession)
 
 app.listen(5000, () => console.log('server is running'))
